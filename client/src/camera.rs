@@ -1,12 +1,10 @@
+use crate::ascii_converter::{ASCII_CHARS, AsciiConverter};
+use clap::ValueEnum;
 use core::error::Error;
 use opencv::{
     core::{Mat, MatTraitConst},
     videoio::{CAP_ANY, VideoCapture, VideoCaptureTrait, VideoCaptureTraitConst},
 };
-
-use clap::ValueEnum;
-
-use crate::ascii_converter::{ASCII_CHARS, AsciiConverter};
 
 pub trait Camera {
     fn get_frame(&mut self) -> Result<String, Box<dyn Error>>;
@@ -27,13 +25,20 @@ pub struct TestCamera {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum TestPatten {
+    #[value(name = "lines")]
     BrokenOldTv,
+
+    #[value(name = "waves")]
     HeartRateMoniter,
+
+    #[value(name = "circle")]
     PoopPov,
 }
 
 impl RealCamera {
     pub fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
+        println!("Starting camera ASCII feed... Press Ctrl+C to exit");
+
         let cam: VideoCapture = VideoCapture::new(0, CAP_ANY)?;
 
         if !cam.is_opened()? {
@@ -42,10 +47,9 @@ impl RealCamera {
 
         let ascii_converter = AsciiConverter::new(width, height);
 
-        println!("Starting camera ASCII feed... Press Ctrl+C to exit");
-        println!("Camera initialized successfully!");
-
         let frame = Mat::default();
+
+        println!("Camera initialized successfully!");
 
         return Ok(Self {
             cam,
@@ -87,7 +91,7 @@ impl Camera for TestCamera {
         let time = self.frame_count / 4;
 
         let frame = match self.test_pattern {
-            TestPatten::PoopPov => {
+            TestPatten::BrokenOldTv => {
                 let mut output = String::new();
                 for y in 0..self.height {
                     for x in 0..self.width {
@@ -98,7 +102,7 @@ impl Camera for TestCamera {
                 }
                 output
             }
-            TestPatten::HeartRateMoniter => {
+            TestPatten::PoopPov => {
                 let mut output = String::new();
                 let cx = self.width as f32 / 2.0;
                 let cy = self.height as f32 / 2.0;
@@ -114,7 +118,7 @@ impl Camera for TestCamera {
                 }
                 output
             }
-            TestPatten::BrokenOldTv => {
+            TestPatten::HeartRateMoniter => {
                 let mut output = String::new();
                 for y in 0..self.height {
                     for x in 0..self.width {
