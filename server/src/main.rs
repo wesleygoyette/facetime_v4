@@ -2,6 +2,7 @@ use log::{error, info};
 use shared::{TCP_PORT, UDP_PORT};
 use wes_sfu::WeSFU;
 
+mod room;
 mod tcp_handler;
 mod udp_handler;
 mod wes_sfu;

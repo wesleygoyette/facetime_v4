@@ -6,7 +6,10 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::tcp_command_type::{TcpCommandPayloadType, TcpCommandType};
+use crate::{
+    StreamID,
+    tcp_command_type::{TcpCommandPayloadType, TcpCommandType},
+};
 
 #[derive(Debug)]
 pub enum TcpCommand {
@@ -19,6 +22,10 @@ pub enum TcpCommand {
         command_type: TcpCommandType,
         payload: Vec<String>,
     },
+    WithStreamIDPayload {
+        command_type: TcpCommandType,
+        payload: StreamID,
+    },
 }
 
 impl TcpCommand {
@@ -27,6 +34,7 @@ impl TcpCommand {
             TcpCommand::Simple(command_type) => command_type.clone(),
             TcpCommand::WithStringPayload { command_type, .. } => command_type.clone(),
             TcpCommand::WithMultiStringPayload { command_type, .. } => command_type.clone(),
+            TcpCommand::WithStreamIDPayload { command_type, .. } => command_type.clone(),
         }
     }
 }
@@ -49,7 +57,7 @@ pub async fn read_command_from_tcp_stream(
     let command_type = TcpCommandType::from_byte(command_type_buf[0])?;
 
     match command_type.payload_type() {
-        TcpCommandPayloadType::Byte => {
+        TcpCommandPayloadType::None => {
             let command = TcpCommand::Simple(command_type);
 
             return Ok(Some(command));
@@ -100,6 +108,18 @@ pub async fn read_command_from_tcp_stream(
 
             return Ok(Some(command));
         }
+
+        TcpCommandPayloadType::StreamID => {
+            let mut payload = StreamID::default();
+            tcp_stream.read_exact(&mut payload).await?;
+
+            let command = TcpCommand::WithStreamIDPayload {
+                command_type,
+                payload,
+            };
+
+            return Ok(Some(command));
+        }
     }
 }
 
@@ -109,7 +129,7 @@ pub async fn write_command_to_tcp_stream(
 ) -> Result<(), Box<dyn Error>> {
     match command {
         TcpCommand::Simple(command_type) => {
-            if command_type.payload_type() != TcpCommandPayloadType::Byte {
+            if command_type.payload_type() != TcpCommandPayloadType::None {
                 return Err("Incorrect payload type".into());
             }
 
@@ -156,6 +176,20 @@ pub async fn write_command_to_tcp_stream(
                 message.push(payload_string.len() as u8);
                 message.extend(payload_string.as_bytes());
             }
+
+            tcp_stream.write_all(&message).await?;
+        }
+
+        TcpCommand::WithStreamIDPayload {
+            command_type,
+            payload,
+        } => {
+            if command_type.payload_type() != TcpCommandPayloadType::StreamID {
+                return Err("Incorrect payload type".into());
+            }
+
+            let mut message = vec![command_type.to_byte()];
+            message.extend(payload);
 
             tcp_stream.write_all(&message).await?;
         }

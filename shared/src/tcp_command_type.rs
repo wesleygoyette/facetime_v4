@@ -9,25 +9,43 @@ pub enum TcpCommandType {
     InvalidUsername,
     GetActiveUsers,
     ReturnActiveUsers,
+    CreateRoom,
+    InvalidRoomName,
+    CreateRoomSuccess,
+    GetRooms,
+    ReturnRooms,
+    JoinRoom,
+    JoinRoomSuccess,
+    InvalidJoinRoom,
 }
 
 #[derive(PartialEq, Eq)]
 pub enum TcpCommandPayloadType {
-    Byte,
+    None,
     SingleString,
     MultiString,
+    StreamID,
 }
 
 impl TcpCommandType {
     pub fn payload_type(&self) -> TcpCommandPayloadType {
         match self {
-            TcpCommandType::HelloFromServer | TcpCommandType::GetActiveUsers => {
-                TcpCommandPayloadType::Byte
-            }
-            TcpCommandType::HelloFromClient | TcpCommandType::InvalidUsername => {
-                TcpCommandPayloadType::SingleString
-            }
+            TcpCommandType::GetRooms => TcpCommandPayloadType::None,
+            TcpCommandType::HelloFromServer => TcpCommandPayloadType::None,
+            TcpCommandType::GetActiveUsers => TcpCommandPayloadType::None,
+            TcpCommandType::CreateRoomSuccess => TcpCommandPayloadType::None,
+
+            TcpCommandType::CreateRoom => TcpCommandPayloadType::SingleString,
+            TcpCommandType::HelloFromClient => TcpCommandPayloadType::SingleString,
+            TcpCommandType::InvalidUsername => TcpCommandPayloadType::SingleString,
+            TcpCommandType::InvalidRoomName => TcpCommandPayloadType::SingleString,
+            TcpCommandType::JoinRoom => TcpCommandPayloadType::SingleString,
+            TcpCommandType::InvalidJoinRoom => TcpCommandPayloadType::SingleString,
+
+            TcpCommandType::ReturnRooms => TcpCommandPayloadType::MultiString,
             TcpCommandType::ReturnActiveUsers => TcpCommandPayloadType::MultiString,
+
+            TcpCommandType::JoinRoomSuccess => TcpCommandPayloadType::StreamID,
         }
     }
 

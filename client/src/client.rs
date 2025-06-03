@@ -7,6 +7,7 @@ use shared::{
 };
 use tokio::net::TcpStream;
 
+use crate::call_handler::CallHandler;
 use crate::user_input_handler::{UserCommand, UserInputHandler};
 
 pub struct Client {
@@ -49,66 +50,148 @@ impl Client {
 
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
-            tokio::select! {
-
-                result = read_line(PROMPT) => {
-                    let line = result?;
-                    match UserInputHandler::handle(&line).await? {
-                        UserCommand::Close => {
-                            println!("Exiting...");
-                            return Ok(());
-                        },
-                        UserCommand::ListUsers => {
-
-                            write_command_to_tcp_stream(TcpCommand::Simple(TcpCommandType::GetActiveUsers), &mut self.tcp_stream).await?;
-                            let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
-
-                            let command = match command_option {
-                                Some(cmd) => cmd,
-                                None => return Err("Connection closed by the server".into()),
-                            };
-
-                            let active_users = match command {
-                                TcpCommand::WithMultiStringPayload { command_type: TcpCommandType::ReturnActiveUsers, payload } => payload,
-                                _ =>
-                                    return Err("Invalid response from server".into())
-
-                            };
-
-                            let total_string = active_users.len().to_string();
-                            println!("\n╔══════════════════════════════════╗");
-                            println!("║ Active users {}(total: {}) ║", " ".repeat(10 - total_string.len()), total_string);
-                            println!("╠══════════════════════════════════╣");
-                            for user in active_users {
-
-                                if user == self.username {
-
-                                    println!("║ • {:30} ║", user + " (you)");
-                                }
-                                else {
-                                    println!("║ • {:30} ║", user);
-                                }
-                            }
-                            println!("╚══════════════════════════════════╝\n");
-                        },
-                        UserCommand::KeepAlive => continue,
-                    }
-
+            let line = read_line(PROMPT).await?;
+            match UserInputHandler::handle(&line).await? {
+                UserCommand::Close => {
+                    println!("Exiting...");
+                    return Ok(());
                 }
-
-                result = read_command_from_tcp_stream(&mut self.tcp_stream) => {
-
-                    let command_option = result?;
+                UserCommand::ListUsers => {
+                    write_command_to_tcp_stream(
+                        TcpCommand::Simple(TcpCommandType::GetActiveUsers),
+                        &mut self.tcp_stream,
+                    )
+                    .await?;
+                    let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
 
                     let command = match command_option {
-                        Some(command) => command,
-                        None => return Ok(()),
+                        Some(cmd) => cmd,
+                        None => return Err("Connection closed by the server".into()),
+                    };
+
+                    let active_users = match command {
+                        TcpCommand::WithMultiStringPayload {
+                            command_type: TcpCommandType::ReturnActiveUsers,
+                            payload,
+                        } => payload,
+                        _ => return Err("Invalid response from server".into()),
+                    };
+
+                    let total_string = active_users.len().to_string();
+                    println!("\n╔══════════════════════════════════╗");
+                    println!(
+                        "║ Active Users {}(total: {}) ║",
+                        " ".repeat(10 - total_string.len()),
+                        total_string
+                    );
+                    println!("╠══════════════════════════════════╣");
+                    for user in active_users {
+                        if user == self.username {
+                            println!("║ • {:30} ║", user + " (you)");
+                        } else {
+                            println!("║ • {:30} ║", user);
+                        }
+                    }
+                    println!("╚══════════════════════════════════╝\n");
+                }
+                UserCommand::ListRooms => {
+                    write_command_to_tcp_stream(
+                        TcpCommand::Simple(TcpCommandType::GetRooms),
+                        &mut self.tcp_stream,
+                    )
+                    .await?;
+                    let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
+
+                    let command = match command_option {
+                        Some(cmd) => cmd,
+                        None => return Err("Connection closed by the server".into()),
+                    };
+
+                    let rooms = match command {
+                        TcpCommand::WithMultiStringPayload {
+                            command_type: TcpCommandType::ReturnRooms,
+                            payload,
+                        } => payload,
+                        _ => return Err("Invalid response from server".into()),
+                    };
+
+                    if rooms.len() == 0 {
+                        println!("\n╔══════════════════════════════════╗");
+                        println!("║ Available Rooms       (total: 0) ║");
+                        println!("╚══════════════════════════════════╝\n");
+                    } else {
+                        let total_string = rooms.len().to_string();
+                        println!("\n╔══════════════════════════════════╗");
+                        println!(
+                            "║ Available Rooms {}(total: {}) ║",
+                            " ".repeat(7 - total_string.len()),
+                            total_string
+                        );
+                        println!("╠══════════════════════════════════╣");
+                        for room in rooms {
+                            println!("║ • {:30} ║", room);
+                        }
+                        println!("╚══════════════════════════════════╝\n");
+                    }
+                }
+                UserCommand::CreateRoom(room_name) => {
+                    let command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::CreateRoom,
+                        payload: room_name.clone(),
+                    };
+                    write_command_to_tcp_stream(command, &mut self.tcp_stream).await?;
+
+                    let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
+
+                    let command = match command_option {
+                        Some(cmd) => cmd,
+                        None => return Err("Connection closed by the server".into()),
                     };
 
                     match command {
-                        _ => return Err("Unkown command received".into())
-                    }
+                        TcpCommand::WithStringPayload {
+                            command_type: TcpCommandType::InvalidRoomName,
+                            payload,
+                        } => {
+                            println!("{}", payload);
+                        }
+                        TcpCommand::Simple(TcpCommandType::CreateRoomSuccess) => {
+                            println!("Successfully created room: '{}'", room_name);
+                        }
+                        _ => return Err("Invalid response from server".into()),
+                    };
                 }
+                UserCommand::JoinRoom(room_name) => {
+                    let command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::JoinRoom,
+                        payload: room_name.clone(),
+                    };
+                    write_command_to_tcp_stream(command, &mut self.tcp_stream).await?;
+
+                    let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
+
+                    let command = match command_option {
+                        Some(cmd) => cmd,
+                        None => return Err("Connection closed by the server".into()),
+                    };
+
+                    match command {
+                        TcpCommand::WithStreamIDPayload {
+                            command_type: TcpCommandType::JoinRoomSuccess,
+                            payload,
+                        } => {
+                            CallHandler::handle_call(&room_name, payload).await?;
+                        }
+                        TcpCommand::WithStringPayload {
+                            command_type: TcpCommandType::InvalidJoinRoom,
+                            payload,
+                        } => {
+                            println!("{}", payload);
+                        }
+                        _ => return Err("Invalid response from server".into()),
+                    };
+                }
+                UserCommand::KeepAlive => continue,
             }
         }
     }

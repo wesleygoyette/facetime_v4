@@ -8,3 +8,5 @@ pub use tcp_command::TcpCommand;
 pub use tcp_command::read_command_from_tcp_stream;
 pub use tcp_command::write_command_to_tcp_stream;
 pub use tcp_command_type::TcpCommandType;
+
+pub type StreamID = [u8; 4];

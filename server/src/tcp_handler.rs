@@ -1,22 +1,34 @@
 use core::error::Error;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use log::info;
+use rand::{Rng, rng};
 use shared::{
-    TcpCommand, TcpCommandType, read_command_from_tcp_stream, write_command_to_tcp_stream,
+    StreamID, TcpCommand, TcpCommandType, read_command_from_tcp_stream, write_command_to_tcp_stream,
 };
 use tokio::{net::TcpStream, sync::Mutex};
+
+use crate::room::Room;
 
 pub struct TcpHandler {
     current_username: Arc<Mutex<Option<String>>>,
     active_usernames: Arc<Mutex<Vec<String>>>,
+    public_rooms: Arc<Mutex<Vec<Room>>>,
+    sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
 }
 
 impl TcpHandler {
-    pub fn new(active_usernames: Arc<Mutex<Vec<String>>>) -> Self {
+    pub fn new(
+        active_usernames: Arc<Mutex<Vec<String>>>,
+        public_rooms: Arc<Mutex<Vec<Room>>>,
+        sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
+    ) -> Self {
+        let current_username = Arc::new(Mutex::new(None));
         Self {
-            current_username: Arc::new(Mutex::new(None)),
+            current_username,
             active_usernames,
+            public_rooms,
+            sid_to_username_map,
         }
     }
 
@@ -39,6 +51,21 @@ impl TcpHandler {
                     command_type: TcpCommandType::InvalidUsername,
                     payload: "Username must contain only alphanumeric characters (A-Z, a-z, 0-9)."
                         .to_string(),
+                },
+                stream,
+            )
+            .await?;
+
+            info!("Client sent invalid username");
+
+            return Ok(());
+        }
+
+        if potential_username.len() > 20 {
+            write_command_to_tcp_stream(
+                TcpCommand::WithStringPayload {
+                    command_type: TcpCommandType::InvalidUsername,
+                    payload: "Username must be less than or equal to 20 characters.".to_string(),
                 },
                 stream,
             )
@@ -104,9 +131,134 @@ impl TcpHandler {
                 };
 
                 write_command_to_tcp_stream(response_command, stream).await?;
+                return Ok(());
+            }
+            TcpCommand::WithStringPayload {
+                command_type: TcpCommandType::CreateRoom,
+                payload,
+            } => {
+                let room_name = payload;
+
+                if !is_valid_room_name(&room_name) {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidRoomName,
+                        payload:
+                            "Room name must contain only alphanumeric characters (A-Z, a-z, 0-9)."
+                                .to_string(),
+                    };
+
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(());
+                }
+
+                if room_name.len() > 20 {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidRoomName,
+                        payload: "Room name must be less than or equal to 20 characters."
+                            .to_string(),
+                    };
+
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(());
+                }
+
+                let mut public_rooms_guard = self.public_rooms.lock().await;
+
+                let room_name_is_taken =
+                    public_rooms_guard.iter().any(|room| room.name == room_name);
+
+                if room_name_is_taken {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidRoomName,
+                        payload: format!("Room: '{}' already exists.", room_name).to_string(),
+                    };
+
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(());
+                }
+
+                public_rooms_guard.push(Room {
+                    name: room_name,
+                    users: Vec::new(),
+                });
+
+                let response_command = TcpCommand::Simple(TcpCommandType::CreateRoomSuccess);
+                write_command_to_tcp_stream(response_command, stream).await?;
 
                 return Ok(());
             }
+
+            TcpCommand::Simple(TcpCommandType::GetRooms) => {
+                let room_names = self
+                    .public_rooms
+                    .lock()
+                    .await
+                    .iter()
+                    .map(|room| room.name.clone())
+                    .collect();
+
+                let response_command = TcpCommand::WithMultiStringPayload {
+                    command_type: TcpCommandType::ReturnRooms,
+                    payload: room_names,
+                };
+
+                write_command_to_tcp_stream(response_command, stream).await?;
+                return Ok(());
+            }
+
+            TcpCommand::WithStringPayload {
+                command_type: TcpCommandType::JoinRoom,
+                payload,
+            } => {
+                let room_name = payload;
+
+                let mut rooms = self.public_rooms.lock().await;
+
+                if let Some(room) = rooms.iter_mut().find(|room| room.name == room_name) {
+                    let mut sid = rng().random();
+                    let mut try_count = 0;
+                    while self.sid_to_username_map.lock().await.contains_key(&sid) {
+                        sid = rng().random();
+
+                        if try_count > 10000 {
+                            return Err(
+                                "Failed to assign SSID within a reasonable time frame".into()
+                            );
+                        }
+                        try_count += 1;
+                    }
+
+                    let current_username = {
+                        let guard = self.current_username.lock().await;
+                        guard
+                            .clone()
+                            .ok_or_else(|| "Could not find username when assigning StreamID")?
+                    };
+
+                    self.sid_to_username_map
+                        .lock()
+                        .await
+                        .insert(sid, current_username.clone());
+
+                    room.users.push(current_username);
+
+                    let response_command = TcpCommand::WithStreamIDPayload {
+                        command_type: TcpCommandType::JoinRoomSuccess,
+                        payload: sid,
+                    };
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(());
+                } else {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidJoinRoom,
+                        payload: "Room not found".to_string(),
+                    };
+                    write_command_to_tcp_stream(response_command, stream).await?;
+
+                    return Ok(());
+                }
+            }
+
             _ => return Err(format!("Command not handled {:?}", command).into()),
         }
     }
@@ -133,4 +285,8 @@ impl TcpHandler {
 
 fn is_valid_username(username: &str) -> bool {
     username.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+fn is_valid_room_name(room_name: &str) -> bool {
+    room_name.chars().all(|c| c.is_ascii_alphanumeric())
 }

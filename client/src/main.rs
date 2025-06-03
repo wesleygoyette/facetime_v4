@@ -1,9 +1,10 @@
+use crate::{ascii_converter::AsciiConverter, client::Client};
+use chrono::Local;
 use rand::{Rng, rng, seq::IndexedRandom};
 use shared::TCP_PORT;
-
-use crate::client::Client;
-use chrono::Local;
-
+mod ascii_converter;
+mod call_handler;
+mod camera;
 mod client;
 mod user_input_handler;
 
@@ -28,14 +29,8 @@ async fn main() {
     }
 }
 
-fn clear_terminal() {
-    print!("\x1B[2J\x1B[1;1H");
-    use std::io::{Write, stdout};
-    stdout().flush().unwrap();
-}
-
 fn print_connected_message(username: String, server_addr: String) {
-    clear_terminal();
+    AsciiConverter::clear_terminal();
 
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let connection_status = "Connection OK";
@@ -59,10 +54,11 @@ fn print_connected_message(username: String, server_addr: String) {
     println!("╚{}╝", "═".repeat(total_width - 2));
 
     println!("\nAvailable Commands:");
-    println!("    - list users        : Show all connected users");
-    println!("    - list rooms        : Show all available rooms");
-    println!("    - connect <room>    : Connect to a specific room");
-    println!("    - exit              : Quit the application");
+    println!("    - list users                  : Show all connected users");
+    println!("    - list rooms                  : Show all available rooms");
+    println!("    - create room <name>          : Create a new room");
+    println!("    - join room <name>            : Connect to a specific room");
+    println!("    - exit                        : Quit the application");
     println!("\nType a command to get started:\n");
 }
 
