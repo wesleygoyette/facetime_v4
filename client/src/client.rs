@@ -11,7 +11,6 @@ use crate::user_input_handler::{UserCommand, UserInputHandler};
 
 pub struct Client {
     stream: TcpStream,
-    username: String,
 }
 
 const PROMPT: &str = "> ";
@@ -32,8 +31,8 @@ impl Client {
             None => return Err("Server closed the connection".into()),
         };
 
-        let username = match resonse_command {
-            TcpCommand::Simple(TcpCommandType::HelloFromServer) => username.to_string(),
+        match resonse_command {
+            TcpCommand::Simple(TcpCommandType::HelloFromServer) => {}
             TcpCommand::WithStringPayload {
                 command_type: TcpCommandType::InvalidUsername,
                 payload,
@@ -41,7 +40,7 @@ impl Client {
             _ => return Err("Server sent invalid response".into()),
         };
 
-        return Ok(Self { stream, username });
+        return Ok(Self { stream });
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
