@@ -8,6 +8,7 @@ use shared::{
 use tokio::net::TcpStream;
 
 use crate::call_handler::CallHandler;
+use crate::camera::TestPatten;
 use crate::user_input_handler::{UserCommand, UserInputHandler};
 
 pub struct Client {
@@ -48,7 +49,7 @@ impl Client {
         });
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn run(&mut self, test_pattern: Option<TestPatten>) -> Result<(), Box<dyn Error>> {
         loop {
             let line = read_line(PROMPT).await?;
             match UserInputHandler::handle(&line).await? {
@@ -180,7 +181,7 @@ impl Client {
                             command_type: TcpCommandType::JoinRoomSuccess,
                             payload,
                         } => {
-                            CallHandler::handle_call(&room_name, payload).await?;
+                            CallHandler::handle_call(&room_name, payload, test_pattern).await?;
                         }
                         TcpCommand::WithStringPayload {
                             command_type: TcpCommandType::InvalidJoinRoom,

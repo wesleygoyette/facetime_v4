@@ -23,16 +23,11 @@ impl WeSFU {
         tcp_addr: String,
         udp_addr: String,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let defualt_room = Room {
-            name: "def".to_string(),
-            users: Vec::new(),
-        };
-
         return Ok(Self {
             tcp_listener: TcpListener::bind(tcp_addr).await?,
             udp_socket: UdpSocket::bind(udp_addr).await?,
             active_usernames: Arc::new(Mutex::new(Vec::new())),
-            public_rooms: Arc::new(Mutex::new(vec![defualt_room])),
+            public_rooms: Arc::new(Mutex::new(Vec::new())),
             sid_to_username_map: Arc::new(Mutex::new(HashMap::new())),
         });
     }

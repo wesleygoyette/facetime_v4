@@ -6,7 +6,7 @@ use opencv::{
     prelude::*,
 };
 
-const ASCII_CHARS: &[char] = &[' ', '.', ',', ':', ';', '+', '*', '?', '%', 'S', '#', '@'];
+pub const ASCII_CHARS: &[char] = &[' ', '.', ',', ':', ';', '+', '*', '?', '%', 'S', '#', '@'];
 
 pub struct AsciiConverter {
     width: i32,

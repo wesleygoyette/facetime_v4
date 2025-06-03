@@ -1,17 +1,36 @@
-use crate::{ascii_converter::AsciiConverter, client::Client};
-use chrono::Local;
-use rand::{Rng, rng, seq::IndexedRandom};
-use shared::TCP_PORT;
 mod ascii_converter;
 mod call_handler;
 mod camera;
 mod client;
 mod user_input_handler;
 
+use crate::{ascii_converter::AsciiConverter, camera::TestPatten, client::Client};
+use chrono::Local;
+use clap::Parser;
+use rand::{Rng, rng, seq::IndexedRandom};
+use shared::TCP_PORT;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long)]
+    username: Option<String>,
+
+    #[arg(short, long, default_value = "127.0.0.1")]
+    server_address: String,
+
+    #[arg(short, long)]
+    test_pattern: Option<TestPatten>,
+}
+
 #[tokio::main]
 async fn main() {
-    let server_addr = format!("127.0.0.1:{}", TCP_PORT);
-    let username = generate_username();
+    let args = Args::parse();
+
+    let server_addr = format!("{}:{}", args.server_address, TCP_PORT);
+    let username = match args.username {
+        Some(username) => username,
+        None => generate_username(),
+    };
 
     let mut client = match Client::connect(&server_addr, &username).await {
         Ok(client) => client,
@@ -23,7 +42,7 @@ async fn main() {
 
     print_connected_message(username, server_addr);
 
-    if let Err(e) = client.run().await {
+    if let Err(e) = client.run(args.test_pattern).await {
         eprintln!("Error: {}", e);
         return;
     }
@@ -53,7 +72,13 @@ fn print_connected_message(username: String, server_addr: String) {
 
     println!("╚{}╝", "═".repeat(total_width - 2));
 
-    println!("\nAvailable Commands:");
+    println!();
+
+    print_available_commands();
+}
+
+fn print_available_commands() {
+    println!("Available Commands:");
     println!("    - list users                  : Show all connected users");
     println!("    - list rooms                  : Show all available rooms");
     println!("    - create room <name>          : Create a new room");
