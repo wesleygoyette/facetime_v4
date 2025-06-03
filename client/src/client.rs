@@ -10,29 +10,30 @@ use tokio::net::TcpStream;
 use crate::user_input_handler::{UserCommand, UserInputHandler};
 
 pub struct Client {
-    stream: TcpStream,
+    tcp_stream: TcpStream,
+    username: String,
 }
 
 const PROMPT: &str = "> ";
 
 impl Client {
     pub async fn connect(addr: &str, username: &str) -> Result<Self, Box<dyn Error>> {
-        let mut stream = TcpStream::connect(addr).await?;
+        let mut tcp_stream = TcpStream::connect(addr).await?;
 
         let hello_command = TcpCommand::WithStringPayload {
             command_type: shared::TcpCommandType::HelloFromClient,
             payload: username.to_string(),
         };
 
-        write_command_to_tcp_stream(hello_command, &mut stream).await?;
+        write_command_to_tcp_stream(hello_command, &mut tcp_stream).await?;
 
-        let resonse_command = match read_command_from_tcp_stream(&mut stream).await? {
+        let resonse_command = match read_command_from_tcp_stream(&mut tcp_stream).await? {
             Some(command) => command,
             None => return Err("Server closed the connection".into()),
         };
 
-        match resonse_command {
-            TcpCommand::Simple(TcpCommandType::HelloFromServer) => {}
+        let username = match resonse_command {
+            TcpCommand::Simple(TcpCommandType::HelloFromServer) => username.to_string(),
             TcpCommand::WithStringPayload {
                 command_type: TcpCommandType::InvalidUsername,
                 payload,
@@ -40,7 +41,10 @@ impl Client {
             _ => return Err("Server sent invalid response".into()),
         };
 
-        return Ok(Self { stream });
+        return Ok(Self {
+            tcp_stream,
+            username,
+        });
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
@@ -54,12 +58,45 @@ impl Client {
                             println!("Exiting...");
                             return Ok(());
                         },
+                        UserCommand::ListUsers => {
+
+                            write_command_to_tcp_stream(TcpCommand::Simple(TcpCommandType::GetActiveUsers), &mut self.tcp_stream).await?;
+                            let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
+
+                            let command = match command_option {
+                                Some(cmd) => cmd,
+                                None => return Err("Connection closed by the server".into()),
+                            };
+
+                            let active_users = match command {
+                                TcpCommand::WithMultiStringPayload { command_type: TcpCommandType::ReturnActiveUsers, payload } => payload,
+                                _ =>
+                                    return Err("Invalid response from server".into())
+
+                            };
+
+                            let total_string = active_users.len().to_string();
+                            println!("\n╔══════════════════════════════════╗");
+                            println!("║ Active users {}(total: {}) ║", " ".repeat(10 - total_string.len()), total_string);
+                            println!("╠══════════════════════════════════╣");
+                            for user in active_users {
+
+                                if user == self.username {
+
+                                    println!("║ • {:30} ║", user + " (you)");
+                                }
+                                else {
+                                    println!("║ • {:30} ║", user);
+                                }
+                            }
+                            println!("╚══════════════════════════════════╝\n");
+                        },
                         UserCommand::KeepAlive => continue,
                     }
 
                 }
 
-                result = read_command_from_tcp_stream(&mut self.stream) => {
+                result = read_command_from_tcp_stream(&mut self.tcp_stream) => {
 
                     let command_option = result?;
 

@@ -2,6 +2,7 @@ use core::error::Error;
 pub enum UserCommand {
     Close,
     KeepAlive,
+    ListUsers,
 }
 
 pub struct UserInputHandler {}
@@ -12,6 +13,7 @@ impl UserInputHandler {
 
         match input {
             "" => return Ok(UserCommand::KeepAlive),
+            "list users" => return Ok(UserCommand::ListUsers),
             "exit" => return Ok(UserCommand::Close),
             _ => {
                 println!("Unknown command");

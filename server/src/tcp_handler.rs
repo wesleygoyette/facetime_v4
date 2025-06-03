@@ -84,12 +84,31 @@ impl TcpHandler {
                 None => return Ok(()),
             };
 
-            self.handle_command_from_user(command).await;
+            self.handle_command_from_user(command, stream).await?;
         }
     }
 
-    pub async fn handle_command_from_user(&self, command: TcpCommand) {
-        dbg!(command);
+    pub async fn handle_command_from_user(
+        &self,
+        command: TcpCommand,
+        stream: &mut TcpStream,
+    ) -> Result<(), Box<dyn Error>> {
+        match command {
+            TcpCommand::Simple(TcpCommandType::GetActiveUsers) => {
+                let active_usernames: Vec<String> =
+                    self.active_usernames.lock().await.iter().cloned().collect();
+
+                let response_command = TcpCommand::WithMultiStringPayload {
+                    command_type: TcpCommandType::ReturnActiveUsers,
+                    payload: active_usernames,
+                };
+
+                write_command_to_tcp_stream(response_command, stream).await?;
+
+                return Ok(());
+            }
+            _ => return Err(format!("Command not handled {:?}", command).into()),
+        }
     }
 
     pub async fn handle_connect_user(&self, current_username: &str) {
