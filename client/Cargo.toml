@@ -1,0 +1,16 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "client"
+
+[dependencies]
+shared = { path = "../shared" }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.5.38", features = ["derive"] }
+crossterm = "0.29.0"
+rand = "0.9.1"
+opencv = "0.94.4"
+chrono = "0.4.41"
