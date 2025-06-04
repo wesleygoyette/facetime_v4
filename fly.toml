@@ -1,0 +1,32 @@
+# fly.toml app configuration file generated for facetime-v4 on 2025-06-04T17:03:48-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'facetime-v4'
+primary_region = 'den'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[deploy]
+  strategy = 'rolling'
+
+[[services]]
+  protocol = 'udp'
+  internal_port = 8070
+
+  [[services.ports]]
+    port = 8070
+
+[[services]]
+  protocol = 'tcp'
+  internal_port = 8069
+
+  [[services.ports]]
+    port = 8069
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

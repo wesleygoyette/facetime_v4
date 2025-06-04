@@ -1,12 +1,15 @@
-use core::error::Error;
 use std::{collections::HashMap, sync::Arc};
 
-use log::info;
+use log::{error, info};
 use rand::{Rng, rng};
 use shared::{
-    StreamID, TcpCommand, TcpCommandType, read_command_from_tcp_stream, write_command_to_tcp_stream,
+    RoomStreamID, StreamID, TcpCommand, TcpCommandType, read_command_from_tcp_stream,
+    write_command_to_tcp_stream,
 };
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::{
+    net::TcpStream,
+    sync::{Mutex, broadcast},
+};
 
 use crate::room::Room;
 
@@ -15,24 +18,31 @@ pub struct TcpHandler {
     active_usernames: Arc<Mutex<Vec<String>>>,
     public_rooms: Arc<Mutex<Vec<Room>>>,
     sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
+    username_to_command_channel_tx: Arc<Mutex<HashMap<String, broadcast::Sender<TcpCommand>>>>,
 }
 
 impl TcpHandler {
-    pub fn new(
+    pub async fn new(
         active_usernames: Arc<Mutex<Vec<String>>>,
         public_rooms: Arc<Mutex<Vec<Room>>>,
         sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
+        username_to_command_channel_tx: Arc<Mutex<HashMap<String, broadcast::Sender<TcpCommand>>>>,
     ) -> Self {
         let current_username = Arc::new(Mutex::new(None));
+
         Self {
             current_username,
             active_usernames,
             public_rooms,
             sid_to_username_map,
+            username_to_command_channel_tx,
         }
     }
 
-    pub async fn handle_stream(&self, stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
+    pub async fn handle_stream(
+        &mut self,
+        stream: &mut TcpStream,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let first_command_from_client_option = read_command_from_tcp_stream(stream).await?;
 
         let potential_username = match first_command_from_client_option {
@@ -104,14 +114,70 @@ impl TcpHandler {
         self.handle_connect_user(&current_username).await;
 
         loop {
-            let command_option = read_command_from_tcp_stream(stream).await?;
+            tokio::select! {
 
-            let command = match command_option {
-                Some(cmd) => cmd,
-                None => return Ok(()),
-            };
+                result = read_command_from_tcp_stream(stream) => {
 
-            self.handle_command_from_user(command, stream).await?;
+                    let command_option = result?;
+
+                    let command = match command_option {
+                        Some(command) => command,
+                        None => return Ok(()),
+                    };
+
+                    let started_call = self.handle_command_from_user(command, stream).await?;
+
+                    if started_call {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let tcp_command_channel_rx = match self
+            .username_to_command_channel_tx
+            .lock()
+            .await
+            .get(&current_username)
+        {
+            Some(tx) => tx.subscribe(),
+            None => {
+                return Err(format!(
+                    "Could not find tcp_command_channel_rx for user: {}",
+                    current_username
+                )
+                .into());
+            }
+        };
+
+        self.handle_call_stream(stream, tcp_command_channel_rx)
+            .await?;
+
+        return Ok(());
+    }
+
+    async fn handle_call_stream(
+        &self,
+        stream: &mut TcpStream,
+        mut tcp_command_channel_rx: broadcast::Receiver<TcpCommand>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        loop {
+            tokio::select! {
+
+                result = read_command_from_tcp_stream(stream) => {
+
+                    if result? == None {
+                        return Ok(());
+                    }
+                }
+
+                result = tcp_command_channel_rx.recv() => {
+
+                    let command = result?;
+
+                    write_command_to_tcp_stream(command, stream).await?;
+                }
+            }
         }
     }
 
@@ -119,7 +185,7 @@ impl TcpHandler {
         &self,
         command: TcpCommand,
         stream: &mut TcpStream,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         match command {
             TcpCommand::Simple(TcpCommandType::GetActiveUsers) => {
                 let active_usernames: Vec<String> =
@@ -131,13 +197,18 @@ impl TcpHandler {
                 };
 
                 write_command_to_tcp_stream(response_command, stream).await?;
-                return Ok(());
+                return Ok(false);
             }
             TcpCommand::WithStringPayload {
                 command_type: TcpCommandType::CreateRoom,
                 payload,
             } => {
                 let room_name = payload;
+
+                let current_username = match self.current_username.lock().await.clone() {
+                    Some(current_username) => current_username,
+                    None => return Err("Invalid user when creating room".into()),
+                };
 
                 if !is_valid_room_name(&room_name) {
                     let response_command = TcpCommand::WithStringPayload {
@@ -148,7 +219,7 @@ impl TcpHandler {
                     };
 
                     write_command_to_tcp_stream(response_command, stream).await?;
-                    return Ok(());
+                    return Ok(false);
                 }
 
                 if room_name.len() > 20 {
@@ -159,7 +230,7 @@ impl TcpHandler {
                     };
 
                     write_command_to_tcp_stream(response_command, stream).await?;
-                    return Ok(());
+                    return Ok(false);
                 }
 
                 let mut public_rooms_guard = self.public_rooms.lock().await;
@@ -174,18 +245,20 @@ impl TcpHandler {
                     };
 
                     write_command_to_tcp_stream(response_command, stream).await?;
-                    return Ok(());
+                    return Ok(false);
                 }
 
                 public_rooms_guard.push(Room {
-                    name: room_name,
-                    users: Vec::new(),
+                    name: room_name.clone(),
+                    username_to_rsid: HashMap::new(),
                 });
+
+                info!("{} created room: {}", current_username, room_name);
 
                 let response_command = TcpCommand::Simple(TcpCommandType::CreateRoomSuccess);
                 write_command_to_tcp_stream(response_command, stream).await?;
 
-                return Ok(());
+                return Ok(false);
             }
 
             TcpCommand::Simple(TcpCommandType::GetRooms) => {
@@ -203,7 +276,7 @@ impl TcpHandler {
                 };
 
                 write_command_to_tcp_stream(response_command, stream).await?;
-                return Ok(());
+                return Ok(false);
             }
 
             TcpCommand::WithStringPayload {
@@ -240,14 +313,50 @@ impl TcpHandler {
                         .await
                         .insert(sid, current_username.clone());
 
-                    room.users.push(current_username);
+                    let rsid: RoomStreamID = rng().random();
+
+                    room.username_to_rsid.insert(current_username.clone(), rsid);
+
+                    for user in room.username_to_rsid.keys() {
+                        if user == &current_username {
+                            continue;
+                        }
+
+                        let username_to_command_channel_tx_guard =
+                            self.username_to_command_channel_tx.lock().await;
+                        let tx_option = username_to_command_channel_tx_guard.get(user);
+
+                        if let Some(tx) = tx_option {
+                            let command = TcpCommand::WithRoomStreamIDPayload {
+                                command_type: TcpCommandType::OtherUserJoinedRoom,
+                                payload: rsid,
+                            };
+
+                            if let Err(e) = tx.send(command) {
+                                error!("Error sending to channel: {} for user: {}", e, user);
+                            }
+                        }
+                    }
+
+                    info!("{} joined room: {}", current_username, room.name);
 
                     let response_command = TcpCommand::WithStreamIDPayload {
                         command_type: TcpCommandType::JoinRoomSuccess,
                         payload: sid,
                     };
                     write_command_to_tcp_stream(response_command, stream).await?;
-                    return Ok(());
+
+                    for (user, rsid) in room.username_to_rsid.iter() {
+                        if user != &current_username {
+                            let add_user_command = TcpCommand::WithRoomStreamIDPayload {
+                                command_type: TcpCommandType::OtherUserJoinedRoom,
+                                payload: *rsid,
+                            };
+                            write_command_to_tcp_stream(add_user_command, stream).await?;
+                        }
+                    }
+
+                    return Ok(true);
                 } else {
                     let response_command = TcpCommand::WithStringPayload {
                         command_type: TcpCommandType::InvalidJoinRoom,
@@ -255,7 +364,7 @@ impl TcpHandler {
                     };
                     write_command_to_tcp_stream(response_command, stream).await?;
 
-                    return Ok(());
+                    return Ok(false);
                 }
             }
 
@@ -270,6 +379,13 @@ impl TcpHandler {
         let mut active_usernames_guard = self.active_usernames.lock().await;
         active_usernames_guard.push(current_username.to_string());
 
+        let tx = broadcast::Sender::new(16);
+
+        self.username_to_command_channel_tx
+            .lock()
+            .await
+            .insert(current_username.to_string(), tx);
+
         info!("{} is connected", current_username);
     }
 
@@ -277,6 +393,40 @@ impl TcpHandler {
         if let Some(current_username) = self.current_username.lock().await.take() {
             let mut active_usernames_guard = self.active_usernames.lock().await;
             active_usernames_guard.retain(|x| *x != current_username);
+
+            self.username_to_command_channel_tx
+                .lock()
+                .await
+                .remove(&current_username);
+
+            for room in self.public_rooms.lock().await.iter_mut() {
+                if let Some(rsid) = room.username_to_rsid.get(&current_username) {
+                    for user in room.username_to_rsid.keys() {
+                        if user == &current_username {
+                            continue;
+                        }
+
+                        let username_to_command_channel_tx_guard =
+                            self.username_to_command_channel_tx.lock().await;
+                        let tx_option = username_to_command_channel_tx_guard.get(user);
+
+                        if let Some(tx) = tx_option {
+                            let command = TcpCommand::WithRoomStreamIDPayload {
+                                command_type: TcpCommandType::OtherUserLeftRoom,
+                                payload: *rsid,
+                            };
+
+                            if let Err(e) = tx.send(command) {
+                                error!("Error sending to channel: {}", e);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(_) = room.username_to_rsid.remove(&current_username) {
+                    info!("{} left room: {}", current_username, room.name);
+                }
+            }
 
             info!("{} disconnected", current_username);
         }

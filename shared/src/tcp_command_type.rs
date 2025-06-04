@@ -1,4 +1,3 @@
-use core::error::Error;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -17,6 +16,8 @@ pub enum TcpCommandType {
     JoinRoom,
     JoinRoomSuccess,
     InvalidJoinRoom,
+    OtherUserJoinedRoom,
+    OtherUserLeftRoom,
 }
 
 #[derive(PartialEq, Eq)]
@@ -25,6 +26,7 @@ pub enum TcpCommandPayloadType {
     SingleString,
     MultiString,
     StreamID,
+    RoomStreamID,
 }
 
 impl TcpCommandType {
@@ -46,6 +48,9 @@ impl TcpCommandType {
             TcpCommandType::ReturnActiveUsers => TcpCommandPayloadType::MultiString,
 
             TcpCommandType::JoinRoomSuccess => TcpCommandPayloadType::StreamID,
+
+            TcpCommandType::OtherUserJoinedRoom => TcpCommandPayloadType::RoomStreamID,
+            TcpCommandType::OtherUserLeftRoom => TcpCommandPayloadType::RoomStreamID,
         }
     }
 
@@ -56,7 +61,9 @@ impl TcpCommandType {
             .expect("TcpCommandType not found in iterator — this should be impossible")
     }
 
-    pub fn from_byte(command: u8) -> Result<TcpCommandType, Box<dyn Error>> {
+    pub fn from_byte(
+        command: u8,
+    ) -> Result<TcpCommandType, Box<dyn std::error::Error + Send + Sync>> {
         for tcp_command_type in TcpCommandType::iter() {
             if tcp_command_type.to_byte() == command {
                 return Ok(tcp_command_type);

@@ -30,21 +30,35 @@ impl UdpHandler {
                 .try_into()
                 .expect("Invalid SID slice length");
 
-            if let Some(from_username) = sid_to_username_map.lock().await.get(&sid).cloned() {
+            let from_username_option = {
+                let guard = sid_to_username_map.lock().await;
+                guard.get(&sid).cloned()
+            };
+
+            if let Some(from_username) = from_username_option {
                 // println!("[UDP] Received id: {:?}, username: {}", sid, from_username);
                 username_to_socket_addr_map.insert(from_username.clone(), from_addr);
 
-                let rooms_guard = rooms.lock().await;
-                let current_room_option = rooms_guard
+                let rooms_snapshot = {
+                    let guard = rooms.lock().await;
+                    guard.clone()
+                };
+
+                let current_room_option = rooms_snapshot
                     .iter()
-                    .find(|room| room.users.contains(&from_username));
+                    .find(|room| room.username_to_rsid.contains_key(&from_username));
 
                 let current_room = match current_room_option {
                     Some(current_room) => current_room,
                     None => continue,
                 };
 
-                for to_username in current_room.users.iter() {
+                let rsid = match current_room.username_to_rsid.get(&from_username) {
+                    Some(rsid) => rsid,
+                    None => continue,
+                };
+
+                for to_username in current_room.username_to_rsid.keys() {
                     if to_username == &from_username {
                         continue;
                     }
@@ -54,9 +68,13 @@ impl UdpHandler {
                         None => continue,
                     };
 
-                    // println!("[UDP] Sent from {} to {}", from_username, to_username);
                     let message_bytes = &buf[sid_len..n];
-                    socket.send_to(message_bytes, send_addr).await?;
+
+                    let mut payload = Vec::with_capacity(1 + message_bytes.len());
+                    payload.extend_from_slice(rsid);
+                    payload.extend_from_slice(message_bytes);
+
+                    socket.send_to(&payload, send_addr).await?;
                 }
             }
         }

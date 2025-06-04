@@ -8,14 +8,13 @@ use crate::{ascii_converter::AsciiConverter, camera::TestPatten, client::Client}
 use chrono::Local;
 use clap::Parser;
 use rand::{Rng, rng, seq::IndexedRandom};
-use shared::TCP_PORT;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
     username: Option<String>,
 
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(short, long, default_value = "137.66.0.54")]
     server_address: String,
 
     #[arg(short, long)]
@@ -26,13 +25,12 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let server_addr = format!("{}:{}", args.server_address, TCP_PORT);
     let username = match args.username {
         Some(username) => username,
         None => generate_username(),
     };
 
-    let mut client = match Client::connect(&server_addr, &username).await {
+    let mut client = match Client::connect(&args.server_address, &username).await {
         Ok(client) => client,
         Err(e) => {
             eprintln!("Error connecting: {}", e);
@@ -40,7 +38,7 @@ async fn main() {
         }
     };
 
-    print_connected_message(username, server_addr);
+    print_connected_message(username, args.server_address);
 
     if let Err(e) = client.run(args.test_pattern).await {
         eprintln!("Error: {}", e);

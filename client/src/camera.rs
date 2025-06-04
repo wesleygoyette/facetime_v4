@@ -1,13 +1,14 @@
+use std::ops::Mul;
+
 use crate::ascii_converter::{ASCII_CHARS, AsciiConverter};
 use clap::ValueEnum;
-use core::error::Error;
 use opencv::{
     core::{Mat, MatTraitConst},
     videoio::{CAP_ANY, VideoCapture, VideoCaptureTrait, VideoCaptureTraitConst},
 };
 
-pub trait Camera {
-    fn get_frame(&mut self) -> Result<String, Box<dyn Error>>;
+pub trait Camera: Send {
+    fn get_frame(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct RealCamera {
@@ -36,9 +37,7 @@ pub enum TestPatten {
 }
 
 impl RealCamera {
-    pub fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
-        println!("Starting camera ASCII feed... Press Ctrl+C to exit");
-
+    pub fn new(width: i32, height: i32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let cam: VideoCapture = VideoCapture::new(0, CAP_ANY)?;
 
         if !cam.is_opened()? {
@@ -49,8 +48,6 @@ impl RealCamera {
 
         let frame = Mat::default();
 
-        println!("Camera initialized successfully!");
-
         return Ok(Self {
             cam,
             ascii_converter,
@@ -60,7 +57,7 @@ impl RealCamera {
 }
 
 impl Camera for RealCamera {
-    fn get_frame(&mut self) -> Result<String, Box<dyn Error>> {
+    fn get_frame(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.cam.read(&mut self.frame)?;
 
         if self.frame.empty() {
@@ -74,7 +71,11 @@ impl Camera for RealCamera {
 }
 
 impl TestCamera {
-    pub fn new(width: i32, height: i32, test_pattern: TestPatten) -> Result<Self, Box<dyn Error>> {
+    pub fn new(
+        width: i32,
+        height: i32,
+        test_pattern: TestPatten,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         return Ok(Self {
             width,
             height,
@@ -85,10 +86,10 @@ impl TestCamera {
 }
 
 impl Camera for TestCamera {
-    fn get_frame(&mut self) -> Result<String, Box<dyn Error>> {
+    fn get_frame(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.frame_count += 1;
 
-        let time = self.frame_count / 4;
+        let time = self.frame_count;
 
         let frame = match self.test_pattern {
             TestPatten::BrokenOldTv => {
@@ -109,7 +110,7 @@ impl Camera for TestCamera {
                 for y in 0..self.height {
                     for x in 0..self.width {
                         let dx = x as f32 - cx;
-                        let dy = y as f32 - cy;
+                        let dy = (y as f32 - cy).mul(2 as f32);
                         let dist = ((dx * dx + dy * dy).sqrt() / 2.5) as i32;
                         let index = ((dist + time) % ASCII_CHARS.len() as i32) as usize;
                         output.push(ASCII_CHARS[index]);

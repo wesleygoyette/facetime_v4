@@ -1,4 +1,3 @@
-use core::error::Error;
 pub enum UserCommand {
     Close,
     KeepAlive,
@@ -11,7 +10,9 @@ pub enum UserCommand {
 pub struct UserInputHandler {}
 
 impl UserInputHandler {
-    pub async fn handle(input: &str) -> Result<UserCommand, Box<dyn Error>> {
+    pub async fn handle(
+        input: &str,
+    ) -> Result<UserCommand, Box<dyn std::error::Error + Send + Sync>> {
         let input = input.trim();
 
         match input {

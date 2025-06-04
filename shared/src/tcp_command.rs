@@ -1,4 +1,3 @@
-use core::error::Error;
 use std::{io::ErrorKind, str::from_utf8};
 
 use tokio::{
@@ -7,11 +6,11 @@ use tokio::{
 };
 
 use crate::{
-    StreamID,
+    RoomStreamID, StreamID,
     tcp_command_type::{TcpCommandPayloadType, TcpCommandType},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TcpCommand {
     Simple(TcpCommandType),
     WithStringPayload {
@@ -26,6 +25,10 @@ pub enum TcpCommand {
         command_type: TcpCommandType,
         payload: StreamID,
     },
+    WithRoomStreamIDPayload {
+        command_type: TcpCommandType,
+        payload: RoomStreamID,
+    },
 }
 
 impl TcpCommand {
@@ -35,13 +38,14 @@ impl TcpCommand {
             TcpCommand::WithStringPayload { command_type, .. } => command_type.clone(),
             TcpCommand::WithMultiStringPayload { command_type, .. } => command_type.clone(),
             TcpCommand::WithStreamIDPayload { command_type, .. } => command_type.clone(),
+            TcpCommand::WithRoomStreamIDPayload { command_type, .. } => command_type.clone(),
         }
     }
 }
 
 pub async fn read_command_from_tcp_stream(
     tcp_stream: &mut TcpStream,
-) -> Result<Option<TcpCommand>, Box<dyn Error>> {
+) -> Result<Option<TcpCommand>, Box<dyn std::error::Error + Send + Sync>> {
     let mut command_type_buf = [0; 1];
     loop {
         match tcp_stream.read(&mut command_type_buf).await {
@@ -120,13 +124,25 @@ pub async fn read_command_from_tcp_stream(
 
             return Ok(Some(command));
         }
+
+        TcpCommandPayloadType::RoomStreamID => {
+            let mut payload = RoomStreamID::default();
+            tcp_stream.read_exact(&mut payload).await?;
+
+            let command = TcpCommand::WithRoomStreamIDPayload {
+                command_type,
+                payload,
+            };
+
+            return Ok(Some(command));
+        }
     }
 }
 
 pub async fn write_command_to_tcp_stream(
     command: TcpCommand,
     tcp_stream: &mut TcpStream,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match command {
         TcpCommand::Simple(command_type) => {
             if command_type.payload_type() != TcpCommandPayloadType::None {
@@ -185,6 +201,20 @@ pub async fn write_command_to_tcp_stream(
             payload,
         } => {
             if command_type.payload_type() != TcpCommandPayloadType::StreamID {
+                return Err("Incorrect payload type".into());
+            }
+
+            let mut message = vec![command_type.to_byte()];
+            message.extend(payload);
+
+            tcp_stream.write_all(&message).await?;
+        }
+
+        TcpCommand::WithRoomStreamIDPayload {
+            command_type,
+            payload,
+        } => {
+            if command_type.payload_type() != TcpCommandPayloadType::RoomStreamID {
                 return Err("Incorrect payload type".into());
             }
 

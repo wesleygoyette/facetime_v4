@@ -2,10 +2,10 @@ use core::error::Error;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use log::{error, info};
-use shared::StreamID;
+use shared::{StreamID, TcpCommand};
 use tokio::{
     net::{TcpListener, TcpStream, UdpSocket},
-    sync::Mutex,
+    sync::{Mutex, broadcast},
 };
 
 use crate::{room::Room, tcp_handler::TcpHandler, udp_handler::UdpHandler};
@@ -16,6 +16,7 @@ pub struct WeSFU {
     active_usernames: Arc<Mutex<Vec<String>>>,
     public_rooms: Arc<Mutex<Vec<Room>>>,
     sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
+    username_to_tcp_command_channel: Arc<Mutex<HashMap<String, broadcast::Sender<TcpCommand>>>>,
 }
 
 impl WeSFU {
@@ -29,6 +30,7 @@ impl WeSFU {
             active_usernames: Arc::new(Mutex::new(Vec::new())),
             public_rooms: Arc::new(Mutex::new(Vec::new())),
             sid_to_username_map: Arc::new(Mutex::new(HashMap::new())),
+            username_to_tcp_command_channel: Arc::new(Mutex::new(HashMap::new())),
         });
     }
 
@@ -49,7 +51,10 @@ impl WeSFU {
         });
 
         loop {
+            let username_to_tcp_command_channel = self.username_to_tcp_command_channel.clone();
+
             tokio::select! {
+
 
                 result = self.tcp_listener.accept() => {
 
@@ -60,6 +65,7 @@ impl WeSFU {
                         self.active_usernames.clone(),
                         tcp_public_rooms.clone(),
                         tcp_sid_to_username_map.clone(),
+                        username_to_tcp_command_channel
                     );
                 }
 
@@ -80,11 +86,18 @@ impl WeSFU {
         active_usernames: Arc<Mutex<Vec<String>>>,
         public_rooms: Arc<Mutex<Vec<Room>>>,
         sid_to_username_map: Arc<Mutex<HashMap<StreamID, String>>>,
+        username_to_tcp_command_channel: Arc<Mutex<HashMap<String, broadcast::Sender<TcpCommand>>>>,
     ) {
         tokio::spawn(async move {
             info!("Opened Connection to {}", tcp_addr);
 
-            let tcp_handler = TcpHandler::new(active_usernames, public_rooms, sid_to_username_map);
+            let mut tcp_handler = TcpHandler::new(
+                active_usernames,
+                public_rooms,
+                sid_to_username_map,
+                username_to_tcp_command_channel,
+            )
+            .await;
 
             if let Err(e) = tcp_handler.handle_stream(&mut tcp_stream).await {
                 error!("Error handling connection: {}", e);

@@ -10,3 +10,4 @@ pub use tcp_command::write_command_to_tcp_stream;
 pub use tcp_command_type::TcpCommandType;
 
 pub type StreamID = [u8; 4];
+pub type RoomStreamID = [u8; 1];

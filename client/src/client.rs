@@ -1,11 +1,11 @@
-use core::error::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 
 use shared::{
-    TcpCommand, TcpCommandType, read_command_from_tcp_stream, write_command_to_tcp_stream,
+    TCP_PORT, TcpCommand, TcpCommandType, UDP_PORT, read_command_from_tcp_stream,
+    write_command_to_tcp_stream,
 };
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UdpSocket};
 
 use crate::call_handler::CallHandler;
 use crate::camera::TestPatten;
@@ -13,14 +13,26 @@ use crate::user_input_handler::{UserCommand, UserInputHandler};
 
 pub struct Client {
     tcp_stream: TcpStream,
+    udp_socket_option: Option<UdpSocket>,
     username: String,
 }
 
 const PROMPT: &str = "> ";
 
 impl Client {
-    pub async fn connect(addr: &str, username: &str) -> Result<Self, Box<dyn Error>> {
-        let mut tcp_stream = TcpStream::connect(addr).await?;
+    pub async fn connect(
+        server_addr: &str,
+        username: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let server_tcp_addr = format!("{}:{}", server_addr, TCP_PORT);
+        let server_udp_addr = format!("{}:{}", server_addr, UDP_PORT);
+
+        dbg!(server_tcp_addr.clone());
+
+        let udp_socket = UdpSocket::bind(&"0.0.0.0:0").await?;
+        udp_socket.connect(&server_udp_addr).await?;
+
+        let mut tcp_stream = TcpStream::connect(server_tcp_addr).await?;
 
         let hello_command = TcpCommand::WithStringPayload {
             command_type: shared::TcpCommandType::HelloFromClient,
@@ -46,10 +58,14 @@ impl Client {
         return Ok(Self {
             tcp_stream,
             username,
+            udp_socket_option: Some(udp_socket),
         });
     }
 
-    pub async fn run(&mut self, test_pattern: Option<TestPatten>) -> Result<(), Box<dyn Error>> {
+    pub async fn run(
+        &mut self,
+        test_pattern: Option<TestPatten>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         loop {
             let line = read_line(PROMPT).await?;
             match UserInputHandler::handle(&line).await? {
@@ -181,7 +197,20 @@ impl Client {
                             command_type: TcpCommandType::JoinRoomSuccess,
                             payload,
                         } => {
-                            CallHandler::handle_call(&room_name, payload, test_pattern).await?;
+                            let udp_socket = self
+                                .udp_socket_option
+                                .take()
+                                .expect("UDP socket already taken");
+
+                            CallHandler::handle_call(
+                                &room_name,
+                                payload,
+                                test_pattern,
+                                &mut self.tcp_stream,
+                                udp_socket,
+                            )
+                            .await?;
+                            return Ok(());
                         }
                         TcpCommand::WithStringPayload {
                             command_type: TcpCommandType::InvalidJoinRoom,
