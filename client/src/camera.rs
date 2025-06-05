@@ -121,18 +121,52 @@ impl Camera for TestCamera {
             }
             TestPatten::HeartRateMoniter => {
                 let mut output = String::new();
+
+                let thickness = 1;
+
                 for y in 0..self.height {
                     for x in 0..self.width {
-                        let wave = ((x as f32 / 5.0 + time as f32 / 5.0).sin() * 5.0
-                            + (self.height / 2) as f32) as i32;
-                        if wave == y {
-                            output.push('@');
-                        } else {
-                            output.push(ASCII_CHARS[0]);
+                        let height_f = self.height as f32;
+
+                        let amp1 = height_f * 0.2;
+                        let amp2 = height_f * 0.15;
+                        let amp3 = height_f * 0.1;
+
+                        let wave1_y = ((height_f / 2.0)
+                            + (x as f32 / 12.0 + time as f32 / 5.0).sin() * amp1)
+                            as i32;
+                        let wave2_y = ((height_f / 2.0)
+                            + (x as f32 / 20.0 + time as f32 / 6.5).cos() * amp2)
+                            as i32;
+                        let wave3_y = ((height_f / 2.0)
+                            + (x as f32 / 10.0 + time as f32 / 3.0).sin() * amp3)
+                            as i32;
+
+                        let current_y = y as i32;
+
+                        let mut count = 0;
+                        if (current_y - wave1_y).abs() <= thickness {
+                            count += 1;
                         }
+                        if (current_y - wave2_y).abs() <= thickness {
+                            count += 1;
+                        }
+                        if (current_y - wave3_y).abs() <= thickness {
+                            count += 1;
+                        }
+
+                        let ch = match count {
+                            3 => '@',
+                            2 => '#',
+                            1 => '+',
+                            _ => ' ',
+                        };
+
+                        output.push(ch);
                     }
                     output.push('\n');
                 }
+
                 output
             }
         };
