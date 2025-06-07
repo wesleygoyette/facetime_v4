@@ -18,6 +18,8 @@ pub enum TcpCommandType {
     InvalidJoinRoom,
     OtherUserJoinedRoom,
     OtherUserLeftRoom,
+    DeleteRoom,
+    DeleteRoomSuccess,
 }
 
 #[derive(PartialEq, Eq)]
@@ -36,6 +38,7 @@ impl TcpCommandType {
             TcpCommandType::HelloFromServer => TcpCommandPayloadType::None,
             TcpCommandType::GetActiveUsers => TcpCommandPayloadType::None,
             TcpCommandType::CreateRoomSuccess => TcpCommandPayloadType::None,
+            TcpCommandType::DeleteRoomSuccess => TcpCommandPayloadType::None,
 
             TcpCommandType::CreateRoom => TcpCommandPayloadType::SingleString,
             TcpCommandType::HelloFromClient => TcpCommandPayloadType::SingleString,
@@ -43,6 +46,7 @@ impl TcpCommandType {
             TcpCommandType::InvalidRoomName => TcpCommandPayloadType::SingleString,
             TcpCommandType::JoinRoom => TcpCommandPayloadType::SingleString,
             TcpCommandType::InvalidJoinRoom => TcpCommandPayloadType::SingleString,
+            TcpCommandType::DeleteRoom => TcpCommandPayloadType::SingleString,
 
             TcpCommandType::ReturnRooms => TcpCommandPayloadType::MultiString,
             TcpCommandType::ReturnActiveUsers => TcpCommandPayloadType::MultiString,

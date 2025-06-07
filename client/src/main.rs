@@ -80,6 +80,7 @@ fn print_available_commands() {
     println!("    - list users                  : Show all connected users");
     println!("    - list rooms                  : Show all available rooms");
     println!("    - create room <name>          : Create a new room");
+    println!("    - delete room <name>          : Delete a room");
     println!("    - join room <name>            : Connect to a specific room");
     println!("    - exit                        : Quit the application");
     println!("\nType a command to get started:\n");

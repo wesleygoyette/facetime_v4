@@ -261,6 +261,61 @@ impl TcpHandler {
                 return Ok(false);
             }
 
+            TcpCommand::WithStringPayload {
+                command_type: TcpCommandType::DeleteRoom,
+                payload,
+            } => {
+                let room_name = payload;
+
+                let current_username = match self.current_username.lock().await.clone() {
+                    Some(current_username) => current_username,
+                    None => return Err("Invalid user when creating room".into()),
+                };
+
+                let mut public_rooms = self.public_rooms.lock().await;
+
+                let room_contains_users = public_rooms
+                    .iter()
+                    .any(|r| r.name == room_name && r.username_to_rsid.len() > 0);
+
+                if room_contains_users {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidRoomName,
+                        payload: format!(
+                            "Room '{}' is in use and cannot be deleted at this time.",
+                            room_name
+                        )
+                        .to_string(),
+                    };
+
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(false);
+                }
+
+                let before_len = public_rooms.len();
+                public_rooms.retain(|r| r.name != room_name);
+                let after_len = public_rooms.len();
+
+                let rooms_deleted = before_len - after_len;
+
+                if rooms_deleted == 0 {
+                    let response_command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::InvalidRoomName,
+                        payload: format!("Room: '{}' does not exist.", room_name).to_string(),
+                    };
+
+                    write_command_to_tcp_stream(response_command, stream).await?;
+                    return Ok(false);
+                }
+
+                info!("{} deleted room: {}", current_username, room_name);
+
+                let response_command = TcpCommand::Simple(TcpCommandType::DeleteRoomSuccess);
+                write_command_to_tcp_stream(response_command, stream).await?;
+
+                return Ok(false);
+            }
+
             TcpCommand::Simple(TcpCommandType::GetRooms) => {
                 let room_names = self
                     .public_rooms

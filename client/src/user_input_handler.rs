@@ -5,6 +5,7 @@ pub enum UserCommand {
     CreateRoom(String),
     ListRooms,
     JoinRoom(String),
+    DeleteRoom(String),
 }
 
 pub struct UserInputHandler {}
@@ -32,6 +33,22 @@ impl UserInputHandler {
                 let room_name = create_cmd_parts[2];
 
                 return Ok(UserCommand::CreateRoom(room_name.to_string()));
+            }
+            "delete room" => {
+                println!("Usage: delete room <name>");
+                return Ok(UserCommand::KeepAlive);
+            }
+            delete_cmd if delete_cmd.starts_with("delete room ") => {
+                let delete_cmd_parts: Vec<&str> = delete_cmd.split(" ").collect();
+
+                if delete_cmd_parts.len() != 3 {
+                    println!("Usage: delete room <name>");
+                    return Ok(UserCommand::KeepAlive);
+                }
+
+                let room_name = delete_cmd_parts[2];
+
+                return Ok(UserCommand::DeleteRoom(room_name.to_string()));
             }
             "join room" => {
                 println!("Usage: join room <name>");

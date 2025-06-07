@@ -27,8 +27,6 @@ impl Client {
         let server_tcp_addr = format!("{}:{}", server_addr, TCP_PORT);
         let server_udp_addr = format!("{}:{}", server_addr, UDP_PORT);
 
-        dbg!(server_tcp_addr.clone());
-
         let udp_socket = UdpSocket::bind(&"0.0.0.0:0").await?;
         udp_socket.connect(&server_udp_addr).await?;
 
@@ -174,6 +172,33 @@ impl Client {
                         }
                         TcpCommand::Simple(TcpCommandType::CreateRoomSuccess) => {
                             println!("Successfully created room: '{}'", room_name);
+                        }
+                        _ => return Err("Invalid response from server".into()),
+                    };
+                }
+                UserCommand::DeleteRoom(room_name) => {
+                    let command = TcpCommand::WithStringPayload {
+                        command_type: TcpCommandType::DeleteRoom,
+                        payload: room_name.clone(),
+                    };
+                    write_command_to_tcp_stream(command, &mut self.tcp_stream).await?;
+
+                    let command_option = read_command_from_tcp_stream(&mut self.tcp_stream).await?;
+
+                    let command = match command_option {
+                        Some(cmd) => cmd,
+                        None => return Err("Connection closed by the server".into()),
+                    };
+
+                    match command {
+                        TcpCommand::WithStringPayload {
+                            command_type: TcpCommandType::InvalidRoomName,
+                            payload,
+                        } => {
+                            println!("{}", payload);
+                        }
+                        TcpCommand::Simple(TcpCommandType::DeleteRoomSuccess) => {
+                            println!("Successfully deleted room: '{}'", room_name);
                         }
                         _ => return Err("Invalid response from server".into()),
                     };
