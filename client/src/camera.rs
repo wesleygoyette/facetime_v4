@@ -1,5 +1,7 @@
 use std::ops::Mul;
 
+use tokio::time::{Duration, Instant, sleep};
+
 use crate::ascii_converter::ASCII_CHARS;
 use clap::ValueEnum;
 use opencv::{
@@ -7,8 +9,20 @@ use opencv::{
     videoio::{CAP_ANY, VideoCapture, VideoCaptureTrait, VideoCaptureTraitConst},
 };
 
-pub trait Camera: Send {
-    fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>>;
+pub const MIN_FRAME_RATE: u64 = 30;
+
+pub enum CameraKind {
+    Real(RealCamera),
+    Test(TestCamera),
+}
+
+impl CameraKind {
+    pub async fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            CameraKind::Real(cam) => cam.get_frame().await,
+            CameraKind::Test(cam) => cam.get_frame().await,
+        }
+    }
 }
 
 pub struct RealCamera {
@@ -28,10 +42,8 @@ pub struct TestCamera {
 pub enum TestPatten {
     #[value(name = "lines")]
     BrokenOldTv,
-
     #[value(name = "waves")]
     HeartRateMoniter,
-
     #[value(name = "circle")]
     PoopPov,
 }
@@ -45,20 +57,26 @@ impl RealCamera {
         }
 
         let frame = Mat::default();
-
-        return Ok(Self { cam, frame });
+        Ok(Self { cam, frame })
     }
-}
 
-impl Camera for RealCamera {
-    fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
+        let start_time = Instant::now();
+
         self.cam.read(&mut self.frame)?;
 
         if self.frame.empty() {
             return Err("Empty frame captured".into());
         }
 
-        return Ok(&self.frame);
+        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
+        let elapsed = start_time.elapsed();
+
+        if elapsed < target_frame_duration {
+            sleep(target_frame_duration - elapsed).await;
+        }
+
+        Ok(&self.frame)
     }
 }
 
@@ -77,10 +95,9 @@ impl TestCamera {
             frame,
         })
     }
-}
 
-impl Camera for TestCamera {
-    fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
+        let start_time = Instant::now();
         self.frame_count += 1;
         let time = self.frame_count;
 
@@ -154,6 +171,13 @@ impl Camera for TestCamera {
                     }
                 }
             }
+        }
+
+        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
+        let elapsed = start_time.elapsed();
+
+        if elapsed < target_frame_duration {
+            sleep(target_frame_duration - elapsed).await;
         }
 
         self.frame = output;

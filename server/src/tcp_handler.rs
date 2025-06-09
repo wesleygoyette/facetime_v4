@@ -59,7 +59,7 @@ impl TcpHandler {
             write_command_to_tcp_stream(
                 TcpCommand::WithStringPayload {
                     command_type: TcpCommandType::InvalidUsername,
-                    payload: "Username must contain only alphanumeric characters (A-Z, a-z, 0-9)."
+                    payload: "Username must contain only letters, numbers, underscores (_), or hyphens (-)."
                         .to_string(),
                 },
                 stream,
@@ -214,7 +214,7 @@ impl TcpHandler {
                     let response_command = TcpCommand::WithStringPayload {
                         command_type: TcpCommandType::InvalidRoomName,
                         payload:
-                            "Room name must contain only alphanumeric characters (A-Z, a-z, 0-9)."
+                            "Room name must contain only letters, numbers, underscores (_), or hyphens (-)."
                                 .to_string(),
                     };
 
@@ -489,9 +489,13 @@ impl TcpHandler {
 }
 
 fn is_valid_username(username: &str) -> bool {
-    username.chars().all(|c| c.is_ascii_alphanumeric())
+    username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 fn is_valid_room_name(room_name: &str) -> bool {
-    room_name.chars().all(|c| c.is_ascii_alphanumeric())
+    room_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }

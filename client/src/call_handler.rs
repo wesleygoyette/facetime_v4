@@ -1,24 +1,16 @@
 use crossterm::terminal::{self};
-
-use std::collections::HashMap;
-
 use shared::{RoomStreamID, StreamID, TcpCommandType, read_command_from_tcp_stream};
-use tokio::io::{AsyncWriteExt, stdout};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 use tokio::time::{Duration, Instant, sleep};
 use tokio::{net::UdpSocket, sync::Mutex};
 
-use std::sync::Arc;
-
-use crate::ascii_converter::{HEIGHT, WIDTH};
-use crate::{
-    ascii_converter::AsciiConverter,
-    camera::{Camera, RealCamera, TestCamera, TestPatten},
-};
-
-const MAX_FRAME_RATE: u64 = 30;
+use crate::ascii_converter::{AsciiConverter, HEIGHT, WIDTH};
+use crate::camera::CameraKind;
+use crate::camera::{MIN_FRAME_RATE, RealCamera, TestCamera, TestPatten};
 
 pub struct CallHandler {}
 
@@ -34,13 +26,17 @@ impl CallHandler {
         let udp_socket_arc = Arc::new(udp_socket);
 
         println!("Joining {}...", room_name);
-
         println!("Starting camera ASCII feed... Press Ctrl+C to exit");
-        let mut camera: Box<dyn Camera> = match test_pattern {
-            Some(test_camera_type) => Box::new(TestCamera::new(WIDTH, HEIGHT, test_camera_type)?),
-            None => Box::new(RealCamera::new()?),
+
+        let mut camera = match test_pattern {
+            Some(test_camera_type) => {
+                CameraKind::Test(TestCamera::new(WIDTH, HEIGHT, test_camera_type)?)
+            }
+            None => CameraKind::Real(RealCamera::new()?),
         };
         println!("Camera initialized successfully!");
+
+        let mut ascii_converter = AsciiConverter::new();
 
         let (current_frame_tx, mut current_frame_rx) = watch::channel(Vec::new());
 
@@ -52,10 +48,10 @@ impl CallHandler {
 
         let send_task = tokio::spawn(async move {
             let mut udp_payload = Vec::with_capacity(1500);
+            let mut frame_count = 0u64;
 
             loop {
                 tokio::select! {
-
                     _ = send_task_ender.recv() => {
                         return;
                     }
@@ -66,7 +62,7 @@ impl CallHandler {
                         udp_payload.clear();
                         udp_payload.extend_from_slice(&sid);
 
-                        let frame = match camera.get_frame() {
+                        let frame = match camera.get_frame().await {
                             Ok(f) => f,
                             Err(e) => {
                                 eprintln!("Failed to get frame: {}", e);
@@ -74,26 +70,29 @@ impl CallHandler {
                             }
                         };
 
-                        let frame_bytes = match AsciiConverter::frame_to_nibbles(frame) {
-                            Ok(fb) => fb,
-                            Err(e) => {
-                                eprintln!("Failed to convert frame: {}", e);
+                        frame_count += 1;
+                        if frame_count % 2 == 0 {
+                            let frame_bytes = match AsciiConverter::frame_to_nibbles(frame) {
+                                Ok(fb) => fb,
+                                Err(e) => {
+                                    eprintln!("Failed to convert frame: {}", e);
+                                    return;
+                                }
+                            };
+
+                            udp_payload.extend_from_slice(&frame_bytes);
+
+                            if let Err(e) = current_frame_tx.send(frame_bytes) {
+                                eprintln!("Error sending to current_frame_tx: {}", e);
                                 return;
                             }
-                        };
 
-                        udp_payload.extend_from_slice(&frame_bytes);
-
-                        if let Err(e) = current_frame_tx.send(frame_bytes) {
-                            eprintln!("Error sending to current_frame_tx: {}", e);
-                            return;
+                            if let Err(_) = socket_sender.send(&udp_payload).await {
+                                return;
+                            }
                         }
 
-                        if let Err(_) = socket_sender.send(&udp_payload).await {
-                            return;
-                        }
-
-                        let target_frame_duration = Duration::from_millis(1000 / MAX_FRAME_RATE);
+                        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
                         let elapsed = start_time.elapsed();
 
                         if elapsed < target_frame_duration {
@@ -114,7 +113,6 @@ impl CallHandler {
 
                 loop {
                     tokio::select! {
-
                         _ = recv_task_ender.recv() => {
                             return;
                         }
@@ -125,9 +123,9 @@ impl CallHandler {
                                     let user_stream_id = buf[0];
                                     let frame_from_network_bytes = &buf[1..n];
                                     let mut guard = woppa_dopaa.lock().await;
-                                        if let Some(x) = guard.get_mut(&[user_stream_id]) {
-                                            *x = Vec::from(frame_from_network_bytes);
-                                        }
+                                    if let Some(x) = guard.get_mut(&[user_stream_id]) {
+                                        *x = Vec::from(frame_from_network_bytes);
+                                    }
                                 }
                                 Err(_) => {
                                     continue;
@@ -141,9 +139,7 @@ impl CallHandler {
 
         loop {
             tokio::select! {
-
                 result = read_command_from_tcp_stream(tcp_stream) => {
-
                     let command = match result? {
                         Some(command) => command,
                         None => {
@@ -153,33 +149,22 @@ impl CallHandler {
 
                     match command {
                         shared::TcpCommand::WithRoomStreamIDPayload {command_type: TcpCommandType::OtherUserJoinedRoom, payload } => {
-
                             let rsid = payload;
-
                             woppa_dopaa_clone.lock().await.insert(rsid, vec![]);
-
                         },
                         shared::TcpCommand::WithRoomStreamIDPayload {command_type: TcpCommandType::OtherUserLeftRoom, payload } => {
-
                             let rsid = payload;
-
                             woppa_dopaa_clone.lock().await.remove(&rsid);
-
                         },
                         _ => {}
                     }
                 }
 
                 result = current_frame_rx.changed() => {
-
                     result?;
 
-                    let start_time = Instant::now();
-
                     let mut all_frames = Vec::new();
-
                     let current_frame = current_frame_rx.borrow().clone();
-
                     all_frames.push(current_frame);
 
                     let other_frames_snapshot: Vec<Vec<u8>> = {
@@ -189,116 +174,89 @@ impl CallHandler {
 
                     all_frames.extend(other_frames_snapshot.iter().map(|s| s.clone()));
 
-                    AsciiConverter::clear_terminal();
                     let (width, height) = terminal::size()?;
-                    print_frames(all_frames, width - 1, height - 1);
-                    stdout().flush().await?;
+                    let rendered_content = render_frames_to_string(all_frames, width - 1, height - 1);
 
-                    let target_frame_duration = Duration::from_millis(1000 / MAX_FRAME_RATE);
-
-                    let elapsed = start_time.elapsed();
-
-                    if elapsed < target_frame_duration {
-                        sleep(target_frame_duration - elapsed).await;
+                    if let Err(e) = ascii_converter.update_terminal_smooth(&rendered_content, width, height) {
+                        eprintln!("Error updating terminal: {}", e);
                     }
                 }
             }
         }
 
         let _ = task_ender_tx.send(());
-
         recv_task.await?;
         send_task.await?;
 
-        return Ok(());
+        Ok(())
     }
 }
 
-fn print_frames(frames: Vec<Vec<u8>>, width: u16, height: u16) {
+fn render_frames_to_string(frames: Vec<Vec<u8>>, width: u16, height: u16) -> String {
     match frames.len() {
         1 => {
             let my_nibbles = &frames[0];
-
-            print!(
-                "{}",
-                AsciiConverter::nibbles_to_ascii(my_nibbles, width, height)
-            );
+            AsciiConverter::nibbles_to_ascii(my_nibbles, width, height)
         }
         2 => {
             let my_nibbles = &frames[0];
             let your_nibbles = &frames[1];
 
             if width as f64 * 0.38f64 < height as f64 {
-                println!(
-                    "{}",
-                    AsciiConverter::nibbles_to_ascii(my_nibbles, width, height / 2)
-                );
-                print!(
-                    "{}",
-                    AsciiConverter::nibbles_to_ascii(your_nibbles, width, height / 2)
-                );
+                let frame1 = AsciiConverter::nibbles_to_ascii(my_nibbles, width, (height - 1) / 2);
+                let frame2 =
+                    AsciiConverter::nibbles_to_ascii(your_nibbles, width, (height - 1) / 2);
+                format!("{}\n{}", frame1, frame2)
             } else {
-                print_two_ascii_frames_side_by_side(
-                    &AsciiConverter::nibbles_to_ascii(my_nibbles, width / 2, height),
-                    &AsciiConverter::nibbles_to_ascii(your_nibbles, width / 2, height),
-                )
+                let frame1 = AsciiConverter::nibbles_to_ascii(my_nibbles, (width - 1) / 2, height);
+                let frame2 =
+                    AsciiConverter::nibbles_to_ascii(your_nibbles, (width - 1) / 2, height);
+                frames_side_by_side_to_string(&frame1, &frame2)
             }
         }
         len => {
             let num_rows = ((len + 1) / 2) as u16;
-
-            let frame_height = height / num_rows;
-            let frame_width = width / 2;
+            let frame_height = (height - num_rows + 1) / num_rows;
+            let frame_width = (width - 2) / 2;
 
             let ascii_frames: Vec<String> = frames
                 .iter()
                 .map(|f| AsciiConverter::nibbles_to_ascii(f, frame_width, frame_height))
                 .collect();
 
-            for pair in ascii_frames.chunks(2) {
+            let mut result = String::new();
+            let chunks = ascii_frames.chunks(2);
+
+            for (idx, pair) in chunks.enumerate() {
+                if idx > 0 {
+                    result.push('\n');
+                    result.push('\n');
+                }
                 if pair.len() == 2 {
-                    print_two_ascii_frames_side_by_side(&pair[0], &pair[1]);
+                    result.push_str(&frames_side_by_side_to_string(&pair[0], &pair[1]));
                 } else {
-                    println!("{}", pair[0]);
+                    result.push_str(&pair[0]);
                 }
             }
+            result
         }
     }
 }
 
-pub fn print_two_ascii_frames_side_by_side(frame1: &str, frame2: &str) {
+pub fn frames_side_by_side_to_string(frame1: &str, frame2: &str) -> String {
     let frame1_lines: Vec<&str> = frame1.lines().collect();
     let frame2_lines: Vec<&str> = frame2.lines().collect();
-
     let max_lines = frame1_lines.len().max(frame2_lines.len());
 
+    let mut result = String::new();
     for i in 0..max_lines {
         let line1 = frame1_lines.get(i).copied().unwrap_or("");
         let line2 = frame2_lines.get(i).copied().unwrap_or("");
 
-        println!("{} {}", line1, line2);
+        if i > 0 {
+            result.push('\n');
+        }
+        result.push_str(&format!("{}  {}", line1, line2));
     }
+    result
 }
-
-// fn print_frames_side_by_side(frames: Vec<String>) {
-// let mut frame_pairs = frames.chunks(2);
-
-// while let Some(pair) = frame_pairs.next() {
-//     let frame1_lines: Vec<&str> = pair[0].lines().collect();
-//     let frame2_lines: Vec<&str> = if pair.len() == 2 {
-//         pair[1].lines().collect()
-//     } else {
-//         Vec::new()
-//     };
-
-//     let max_lines = frame1_lines.len().max(frame2_lines.len());
-
-//     for i in 0..max_lines {
-//         let line1 = frame1_lines.get(i).unwrap_or(&"");
-//         let line2 = frame2_lines.get(i).unwrap_or(&"");
-//         println!("{} {}", line1, line2);
-//     }
-
-//     println!();
-// }
-// }
