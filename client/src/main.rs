@@ -88,7 +88,7 @@ fn print_available_commands() {
 
 fn generate_username() -> String {
     let adjectives = ["fast", "lazy", "cool", "smart", "brave"];
-    let nouns = ["Tiger", "Eagle", "Lion", "Panda", "Wolf"];
+    let nouns = ["tiger", "eagle", "lion", "panda", "wolf"];
 
     let mut rng = rng();
 
@@ -96,5 +96,5 @@ fn generate_username() -> String {
     let noun = nouns.choose(&mut rng).unwrap();
     let number: u16 = rng.random_range(1..9999);
 
-    format!("{}{}{}", adjective, noun, number)
+    format!("{}-{}{}", adjective, noun, number)
 }
