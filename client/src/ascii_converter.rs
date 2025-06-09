@@ -14,7 +14,7 @@ pub const ASCII_CHARS: &[char] = &[
     ' ', '.', '^', '=', '~', '-', ',', ':', ';', '+', '*', '?', '%', 'S', '#', '@',
 ];
 
-pub const WIDTH: i32 = 90;
+pub const WIDTH: i32 = 92;
 pub const HEIGHT: i32 = 28;
 
 pub struct AsciiConverter {
