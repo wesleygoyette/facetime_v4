@@ -175,11 +175,10 @@ impl AsciiConverter {
             }
         }
 
-        // Handle case where new content has fewer lines
         if old_lines.len() > new_lines.len() {
             for line_num in new_lines.len()..old_lines.len() {
                 print!("\x1B[{};1H", line_num + 1);
-                print!("\x1B[K"); // Clear line
+                print!("\x1B[K");
             }
             updated = true;
         }
