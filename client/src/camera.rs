@@ -9,7 +9,7 @@ use opencv::{
     videoio::{CAP_ANY, VideoCapture, VideoCaptureTrait, VideoCaptureTraitConst},
 };
 
-pub const MIN_FRAME_RATE: u64 = 30;
+pub const MAX_FRAME_RATE: u64 = 120;
 
 pub enum CameraKind {
     Real(RealCamera),
@@ -69,7 +69,7 @@ impl RealCamera {
             return Err("Empty frame captured".into());
         }
 
-        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
+        let target_frame_duration = Duration::from_millis(1000 / MAX_FRAME_RATE);
         let elapsed = start_time.elapsed();
 
         if elapsed < target_frame_duration {
@@ -99,7 +99,7 @@ impl TestCamera {
     pub async fn get_frame(&mut self) -> Result<&Mat, Box<dyn std::error::Error + Send + Sync>> {
         let start_time = Instant::now();
         self.frame_count += 1;
-        let time = self.frame_count;
+        let time = self.frame_count * 20 / MAX_FRAME_RATE as i32;
 
         let mut output = Mat::zeros(self.height, self.width, CV_8UC1)?.to_mat()?;
 
@@ -173,7 +173,7 @@ impl TestCamera {
             }
         }
 
-        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
+        let target_frame_duration = Duration::from_millis(1000 / MAX_FRAME_RATE);
         let elapsed = start_time.elapsed();
 
         if elapsed < target_frame_duration {

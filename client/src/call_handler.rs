@@ -10,7 +10,7 @@ use tokio::{net::UdpSocket, sync::Mutex};
 
 use crate::ascii_converter::{AsciiConverter, HEIGHT, WIDTH};
 use crate::camera::CameraKind;
-use crate::camera::{MIN_FRAME_RATE, RealCamera, TestCamera, TestPatten};
+use crate::camera::{MAX_FRAME_RATE, RealCamera, TestCamera, TestPatten};
 
 pub struct CallHandler {}
 
@@ -92,7 +92,7 @@ impl CallHandler {
                             }
                         }
 
-                        let target_frame_duration = Duration::from_millis(1000 / MIN_FRAME_RATE);
+                        let target_frame_duration = Duration::from_millis(1000 / MAX_FRAME_RATE);
                         let elapsed = start_time.elapsed();
 
                         if elapsed < target_frame_duration {
